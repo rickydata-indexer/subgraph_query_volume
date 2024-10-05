@@ -1,0 +1,240 @@
+---
+title: "Subgraph Query Volume Data"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    theme: spacelab
+runtime: shiny
+---
+
+```{r setup, include=FALSE, cache=TRUE}
+library(flexdashboard)
+library(shiny)
+library(dplyr)
+library(ggplot2)
+library(DT)
+library(lubridate)
+library(plotly)  # Add this line to import plotly
+library(scales)  # Add this line to import scales
+
+# Load the data
+result <- read.csv("subgraph_data.csv")
+
+# Data preprocessing
+result$date <- as.POSIXct(as.numeric(result$end_epoch), origin="1970-01-01", tz="UTC")
+result$query_count <- as.numeric(result$query_count)
+
+# Calculate date range
+max_date <- max(result$date)
+min_date <- min(result$date)
+
+# Get unique chain_ids
+chain_ids <- sort(unique(result$chain_id))
+```
+
+
+Subgraph Overview
+===================================
+
+Column {.sidebar}
+-----------------------------------------------------------------------
+
+```{r}
+selectInput("chain_filter", "Select Chain ID:",
+            choices = c("All", chain_ids),
+            selected = "All",
+            multiple = TRUE)  # Change this line
+
+# Function to filter data based on chain_id
+filter_by_chain <- function(data) {
+  if ("All" %in% input$chain_filter || length(input$chain_filter) == 0) {
+    data
+  } else {
+    data %>% filter(chain_id %in% input$chain_filter)
+  }
+}
+```
+
+Column {.tabset}
+-----------------------------------------------------------------------
+
+### Top Subgraphs by Query Volume
+
+```{r}
+renderDataTable({
+  filtered_result <- filter_by_chain(result)
+  
+  top_subgraphs <- filtered_result %>%
+    group_by(subgraph_deployment_ipfs_hash) %>%
+    summarize(total_queries = sum(query_count)) %>%
+    arrange(desc(total_queries)) %>%
+    head(100)
+  
+  datatable(top_subgraphs,
+            escape = FALSE,
+            options = list(pageLength = 10, scrollX = TRUE))
+})
+```
+
+### Top Subgraphs by Query Volume Chart
+
+```{r}
+renderPlotly({
+  filtered_result <- filter_by_chain(result)
+  
+  top_10_subgraphs <- filtered_result %>%
+    group_by(subgraph_deployment_ipfs_hash) %>%
+    summarize(total_queries = sum(query_count)) %>%
+    top_n(10, total_queries) %>%
+    pull(subgraph_deployment_ipfs_hash)
+  
+  filtered_data <- filtered_result %>%
+    filter(subgraph_deployment_ipfs_hash %in% top_10_subgraphs)
+  
+  p <- ggplot(filtered_data, aes(x = date, y = query_count, color = subgraph_deployment_ipfs_hash)) +
+    geom_line() +
+    labs(title = "Top 10 Subgraphs by Query Volume",
+         x = "Date",
+         y = "Query Count",
+         color = "Subgraph ID") +
+    theme_minimal() +
+    theme(legend.position = "bottom") +
+    scale_y_continuous(labels = scales::comma)
+  
+  ggplotly(p)
+})
+```
+
+### Top Volume Increases
+
+```{r}
+volume_increase <- reactive({
+  filtered_result <- filter_by_chain(result)
+  
+  filtered_result %>%
+    group_by(subgraph_deployment_ipfs_hash) %>%
+    arrange(date) %>%
+    summarize(
+      start_volume = first(query_count),
+      end_volume = last(query_count),
+      start_date = first(date),
+      end_date = last(date),
+      volume_increase = end_volume - start_volume,
+      hours_difference = as.numeric(difftime(end_date, start_date, units = "hours"))
+    ) %>%
+    filter(hours_difference > 0) %>%  # Ensure at least some time difference
+    mutate(hourly_increase = volume_increase / hours_difference) %>%
+    arrange(desc(hourly_increase)) %>%
+    head(100)
+})
+
+renderDataTable({
+  datatable(volume_increase(),
+            escape = FALSE,
+            options = list(pageLength = 10, scrollX = TRUE))
+})
+```
+
+### Top Volume Increases Chart
+
+```{r}
+renderPlotly({
+  filtered_result <- filter_by_chain(result)
+  
+  top_increase_subgraphs <- volume_increase() %>%
+    head(10) %>%  # Take only top 10
+    pull(subgraph_deployment_ipfs_hash)
+  
+  filtered_data <- filtered_result %>%
+    filter(subgraph_deployment_ipfs_hash %in% top_increase_subgraphs) %>%
+    group_by(subgraph_deployment_ipfs_hash) %>%
+    arrange(date) %>%
+    slice(c(1, n()))  # Keep only first and last data points
+  
+  p <- ggplot(filtered_data, aes(x = date, y = query_count, color = subgraph_deployment_ipfs_hash, group = subgraph_deployment_ipfs_hash)) +
+    geom_line() +
+    geom_point(size = 3) +
+    labs(title = "Top 10 Query Volume Increases: First vs Last Available Hour",
+         x = "Date",
+         y = "Query Count",
+         color = "Subgraph ID") +
+    theme_minimal() +
+    theme(legend.position = "bottom") +
+    scale_y_continuous(labels = scales::comma)
+  
+  ggplotly(p)
+})
+```
+
+Raw Data
+===================================
+
+Column {.sidebar}
+-----------------------------------------------------------------------
+
+```{r}
+selectInput("chain_filter2", "Select Chain ID:",
+            choices = c("All", chain_ids),
+            selected = "All",
+            multiple = TRUE)  # Change this line
+```
+
+Column
+-----------------------------------------------------------------------
+
+### Raw Data
+
+```{r}
+renderDataTable({
+  if ("All" %in% input$chain_filter2 || length(input$chain_filter2) == 0) {
+    table_data <- result
+  } else {
+    table_data <- result %>% filter(chain_id %in% input$chain_filter2)
+  }
+  
+  datatable(table_data,
+            escape = FALSE,
+            extensions = "Buttons",
+            options = list(
+              scrollX = TRUE,
+              scrollY = "500px",
+              paging = TRUE,
+              searching = TRUE,
+              ordering = TRUE,
+              dom = 'Bfrtip',
+              buttons = c('copy', 'csv', 'excel', 'pdf'),
+              pageLength = 50
+            ))
+})
+```
+
+All Subgraphs Visualization
+===================================
+
+Column
+-----------------------------------------------------------------------
+
+### Total Query Count Across All Subgraphs
+
+```{r}
+renderPlotly({
+  filtered_result <- filter_by_chain(result)
+  
+  # Aggregate data: sum query_count for each end_epoch
+  aggregated_data <- filtered_result %>%
+    group_by(date) %>%
+    summarize(total_query_count = sum(query_count, na.rm = TRUE))
+  
+  p <- ggplot(aggregated_data, aes(x = date, y = total_query_count)) +
+    geom_line() +
+    geom_point(size = 2) +
+    labs(title = "Total Query Count Across All Subgraphs",
+         x = "Date",
+         y = "Total Query Count") +
+    theme_minimal() +
+    scale_y_continuous(labels = scales::comma)
+  
+  ggplotly(p)
+})
+```
