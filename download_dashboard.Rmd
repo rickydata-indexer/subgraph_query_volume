@@ -6,6 +6,8 @@ output:
     vertical_layout: fill
     theme: spacelab
 runtime: shiny
+resource_files:
+- "mlflow-291816-af4d7d28f54e.json"
 ---
 
 ```{r setup, include=FALSE, cache=TRUE}
@@ -18,21 +20,144 @@ library(lubridate)
 library(plotly)  # Add this line to import plotly
 library(scales)  # Add this line to import scales
 library(pins)
-library(googleCloudStorageR)
+library(httr)
+library(jsonlite)
+# library(googleCloudStorageR)
 # gcs_setup() # if needed for initial setup
 
 # connect to pins board
-board = board_gcs('indexer-data-qos', prefix = NULL, versioned = FALSE, cache = NULL)
+# board = board_gcs('indexer-data-qos', prefix = NULL, versioned = FALSE, cache = NULL)
 
-result = board %>% pin_read("qos_subgraph_subgraph_level_full_historical")
+# result = board %>% pin_read("qos_subgraph_subgraph_level_full_historical")
+
+
+
+# Function to make GraphQL query
+make_query <- function(query, variables = list()) {
+  url <- "https://gateway.thegraph.com/api/e6e6aa14c52b00925f31e4672da4d3c0/subgraphs/id/Dtr9rETvwokot4BSXaD5tECanXfqfJKcvHuaaEgPDD2D"
+  
+  response <- POST(
+    url,
+    body = list(query = query, variables = variables),
+    encode = "json"
+  )
+  
+  if (status_code(response) != 200) {
+    stop("API request failed with status code: ", status_code(response))
+  }
+  
+  content <- content(response, "text")
+  parsed <- fromJSON(content)
+  
+  if (!is.null(parsed$errors)) {
+    stop("GraphQL query error: ", toJSON(parsed$errors))
+  }
+  
+  return(parsed$data$queryDataPoints)
+}
+
+# Updated function to fetch data
+fetch_data <- function(batch_size = 1000, max_rows = 100000) {
+  all_data <- data.frame()
+  skip <- 0
+  last_end_epoch <- 9999999999.0  # Use a large number as a float
+  
+  while (nrow(all_data) < max_rows) {
+    query <- sprintf('
+    {
+      queryDataPoints(
+        first: %d
+        skip: %d
+        orderBy: end_epoch
+        orderDirection: desc
+        where: {end_epoch_lt: %.1f}
+      ) {
+        end_epoch
+        chain_id
+        gateway_query_success_rate
+        query_count
+        total_query_fees
+        user_attributed_error_rate
+        avg_gateway_latency_ms
+        avg_query_fee
+        subgraph_deployment_ipfs_hash
+      }
+    }
+    ', batch_size, skip, last_end_epoch)
+    
+    tryCatch({
+      batch_data <- make_query(query)
+      
+      if (is.null(batch_data) || nrow(batch_data) == 0) {
+        cat("No more data to fetch.\n")
+        break
+      }
+      
+      all_data <- bind_rows(all_data, batch_data)
+      last_end_epoch <- min(as.numeric(batch_data$end_epoch))
+      
+      cat(sprintf("Fetched %d rows. Total: %d\n", nrow(batch_data), nrow(all_data)))
+      
+      if (nrow(batch_data) < batch_size) {
+        cat("Reached the end of available data.\n")
+        break
+      }
+      
+      # Reset skip every 5,000 rows
+      if (nrow(all_data) %% 5000 < batch_size) {
+        skip <- 0
+        cat("Reset skip to 0.\n")
+      } else {
+        skip <- skip + nrow(batch_data)
+      }
+      
+    }, error = function(e) {
+      cat("Error occurred:", conditionMessage(e), "\n")
+      cat("Retrying in 5 seconds...\n")
+      Sys.sleep(5)
+    })
+  }
+  
+  return(all_data)
+}
+
+# Main execution
+cat("Starting data check...\n")
+
+csv_file <- "subgraph_data.csv"
+current_time <- Sys.time()
+
+if (file.exists(csv_file)) {
+  file_info <- file.info(csv_file)
+  time_diff <- as.numeric(difftime(current_time, file_info$mtime, units = "mins"))
+  
+  if (time_diff <= 30) {
+    # cat("Data has been pulled within the last 30 minutes. Skipping fetch.\n")
+  } else {
+    # cat("Data is older than 30 minutes. Fetching new data...\n")
+    result <- fetch_data(batch_size = 1000, max_rows = 100000)
+    # cat(sprintf("\nTotal rows fetched: %d\n", nrow(result)))
+    write.csv(result, csv_file, row.names = FALSE)
+    # cat("Data saved to subgraph_data.csv\n")
+  }
+} else {
+  # cat("CSV file does not exist. Fetching new data...\n")
+  result <- fetch_data(batch_size = 1000, max_rows = 100000)
+  # cat(sprintf("\nTotal rows fetched: %d\n", nrow(result)))
+  write.csv(result, csv_file, row.names = FALSE)
+  # cat("Data saved to subgraph_data.csv\n")
+}
+
+# Read the CSV file
+results <- read.csv(csv_file)
 
 # Data preprocessing
-result$date = as.POSIXct(as.numeric(result$end_epoch), origin="1970-01-01", tz="UTC")
-result$query_count = as.numeric(result$query_count)
+result$date <- as.POSIXct(as.numeric(result$end_epoch), origin="1970-01-01", tz="UTC")
+result$query_count <- as.numeric(result$query_count)
 
 # Calculate date range
-max_date = max(result$date)
-min_date = min(result$date)
+max_date <- max(result$date)
+min_date <- min(result$date)
 
 # Get unique chain_ids
 chain_ids = sort(unique(result$chain_id))
