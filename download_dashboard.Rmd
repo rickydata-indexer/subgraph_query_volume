@@ -31,7 +31,6 @@ library(jsonlite)
 # result = board %>% pin_read("qos_subgraph_subgraph_level_full_historical")
 
 
-
 # Function to make GraphQL query
 make_query <- function(query, variables = list()) {
   url <- "https://gateway.thegraph.com/api/e6e6aa14c52b00925f31e4672da4d3c0/subgraphs/id/Dtr9rETvwokot4BSXaD5tECanXfqfJKcvHuaaEgPDD2D"
@@ -149,7 +148,7 @@ if (file.exists(csv_file)) {
 }
 
 # Read the CSV file
-results <- read.csv(csv_file)
+result <- read.csv(csv_file)
 
 # Data preprocessing
 result$date <- as.POSIXct(as.numeric(result$end_epoch), origin="1970-01-01", tz="UTC")
@@ -368,3 +367,111 @@ renderPlotly({
   ggplotly(p)
 })
 ```
+
+
+By Chain
+===================================
+
+Column {.sidebar}
+-----------------------------------------------------------------------
+
+```{r}
+selectInput("chain_filter3", "Select Chain ID:",
+            choices = c("All", chain_ids),
+            selected = "All",
+            multiple = TRUE)
+```
+
+
+Column {.tabset}
+-----------------------------------------------------------------------
+
+### Query Volume by Chain
+
+```{r}
+renderPlotly({
+  if ("All" %in% input$chain_filter3 || length(input$chain_filter3) == 0) {
+    filtered_data = result
+  } else {
+    filtered_data = result %>% filter(chain_id %in% input$chain_filter3)
+  }
+  
+  chain_summary = filtered_data %>%
+    group_by(chain_id) %>%
+    summarize(sum_queries = sum(query_count)) %>%
+    arrange(desc(sum_queries))
+  
+  p = ggplot(chain_summary, aes(x = reorder(chain_id, -sum_queries), y = sum_queries)) +
+    geom_bar(stat = "identity", fill = "steelblue") +
+    labs(title = "Total Query Volume by Chain",
+         x = "Chain ID",
+         y = "Total Query Count") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    scale_y_continuous(labels = scales::comma)
+  
+  ggplotly(p)
+})
+```
+
+### Chain Query Volume Over Time
+
+
+```{r}
+renderPlotly({
+  if ("All" %in% input$chain_filter3 || length(input$chain_filter3) == 0) {
+    filtered_data = result
+  } else {
+    filtered_data = result %>% filter(chain_id %in% input$chain_filter3)
+  }
+  
+  time_series_data = filtered_data %>%
+    group_by(chain_id, date) %>%
+    summarize(total_queries = sum(query_count))
+  
+  p = ggplot(time_series_data, aes(x = date, y = total_queries, color = chain_id)) +
+    geom_line() +
+    labs(title = "Query Volume Over Time by Chain",
+         x = "Date",
+         y = "Query Count",
+         color = "Chain ID") +
+    theme_minimal() +
+    theme(legend.position = "bottom") +
+    scale_y_continuous(labels = scales::comma)
+  
+  ggplotly(p)
+})
+```
+
+
+### Chain Summary Table
+
+```{r}
+renderDataTable({
+  if ("All" %in% input$chain_filter3 || length(input$chain_filter3) == 0) {
+    filtered_data = result
+  } else {
+    filtered_data = result %>% filter(chain_id %in% input$chain_filter3)
+  }
+  
+  chain_summary = filtered_data %>%
+    group_by(chain_id) %>%
+    summarize(
+      total_queries = sum(query_count),
+      avg_query_fee = mean(avg_query_fee, na.rm = TRUE),
+      avg_gateway_latency = mean(avg_gateway_latency_ms, na.rm = TRUE),
+      avg_success_rate = mean(gateway_query_success_rate, na.rm = TRUE)
+    ) %>%
+    arrange(desc(total_queries))
+  
+  datatable(chain_summary,
+            options = list(pageLength = 10, scrollX = TRUE),
+            rownames = FALSE) %>%
+    formatRound(columns = c("total_queries", "avg_query_fee", "avg_gateway_latency", "avg_success_rate"), digits = 2)
+})
+```
+
+
+
+
+
