@@ -97,11 +97,3 @@ The dashboard caches data in a CSV file (`subgraph_data.csv`) to improve perform
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Todo
-
-- Add more information about the subgraphs (display names, signal, indexer stake)
-- Implement process with pins to provide granular historical data
