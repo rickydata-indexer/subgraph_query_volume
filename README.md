@@ -1,5 +1,9 @@
 # Subgraph Query Volume Dashboard
 
+https://www.rickydata-indexer.com/tools/qos-subgraph-data-download
+
+<img width="1480" alt="image" src="https://github.com/user-attachments/assets/74adf48b-3f04-42b8-93f3-75cf1cb4dbfe" />
+
 An interactive R Shiny dashboard that visualizes query volume data from The Graph Protocol's QoS subgraph. The dashboard provides insights into subgraph usage patterns, query volumes, and performance metrics across different chains.
 
 ## Features
