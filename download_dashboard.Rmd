@@ -6,8 +6,6 @@ output:
     vertical_layout: fill
     theme: spacelab
 runtime: shiny
-resource_files:
-- "mlflow-291816-af4d7d28f54e.json"
 ---
 
 ```{r setup, include=FALSE, cache=TRUE}
@@ -33,7 +31,11 @@ library(jsonlite)
 
 # Function to make GraphQL query
 make_query <- function(query, variables = list()) {
-  url <- "https://gateway.thegraph.com/api/e6e6aa14c52b00925f31e4672da4d3c0/subgraphs/id/Dtr9rETvwokot4BSXaD5tECanXfqfJKcvHuaaEgPDD2D"
+  api_key <- Sys.getenv("THEGRAPH_API_KEY")
+  if (api_key == "") {
+    stop("THEGRAPH_API_KEY environment variable is not set")
+  }
+  url <- paste0("https://gateway.thegraph.com/api/", api_key, "/subgraphs/id/Dtr9rETvwokot4BSXaD5tECanXfqfJKcvHuaaEgPDD2D")
   
   response <- POST(
     url,
@@ -470,8 +472,3 @@ renderDataTable({
     formatRound(columns = c("total_queries", "avg_query_fee", "avg_gateway_latency", "avg_success_rate"), digits = 2)
 })
 ```
-
-
-
-
-
